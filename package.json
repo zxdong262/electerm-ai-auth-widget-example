@@ -1,0 +1,62 @@
+{
+  "name": "electerm-ai-auth-widget-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An electerm widget that signs in to a ChatGPT or SuperGrok subscription and exposes it as a local OpenAI Responses endpoint.",
+  "main": "index.js",
+  "license": "MIT",
+  "author": "ZHAO Xudong",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zxdong262/electerm-ai-auth-widget-example.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "electerm": {
+    "id": "ai-auth-proxy",
+    "name": "AI subscription proxy",
+    "description": "Sign in to a ChatGPT or SuperGrok subscription, then point electerm's AI config at the local proxy it runs.",
+    "version": "0.1.0",
+    "author": "ZHAO Xudong",
+    "homepage": "https://github.com/zxdong262/electerm-ai-auth-widget-example",
+    "type": "instance",
+    "singleInstance": true,
+    "configs": [
+      {
+        "name": "provider",
+        "type": "select",
+        "label": "Provider",
+        "default": "chatgpt",
+        "description": "Which subscription the proxy forwards to. One proxy serves one provider.",
+        "choices": [
+          {
+            "label": "ChatGPT",
+            "value": "chatgpt"
+          },
+          {
+            "label": "SuperGrok",
+            "value": "supergrok"
+          }
+        ]
+      },
+      {
+        "name": "port",
+        "type": "number",
+        "label": "Local port",
+        "default": 8788,
+        "description": "The proxy listens on 127.0.0.1 at this port. Change it only if 8788 is taken; the URL in electerm's AI config has to match."
+      },
+      {
+        "name": "autoRun",
+        "type": "boolean",
+        "label": "Start with electerm",
+        "default": true,
+        "description": "Start this widget when electerm starts, so the AI panel keeps working without opening the widget list first."
+      }
+    ]
+  }
+}
