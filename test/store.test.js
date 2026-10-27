@@ -29,7 +29,11 @@ test('round-trips a record and writes it encrypted', () => {
   const onDisk = fs.readFileSync(path.join(dir, 'chatgpt.json'), 'utf8')
   assert.ok(onDisk.startsWith('v1:'), 'file is versioned')
   assert.ok(!onDisk.includes('secret-token'), 'token is not written in the clear')
-  assert.equal(fs.statSync(path.join(dir, 'chatgpt.json')).mode & 0o777, 0o600)
+  if (process.platform !== 'win32') {
+    // Windows does not report POSIX permission bits (it answers 0o666), so
+    // this assertion says nothing there and only makes the suite red.
+    assert.equal(fs.statSync(path.join(dir, 'chatgpt.json')).mode & 0o777, 0o600)
+  }
 })
 
 test('refuses to store anything when encryption is unavailable', () => {
@@ -84,4 +88,21 @@ test('remove deletes only that provider', () => {
   store.remove('chatgpt')
   assert.equal(store.get('chatgpt'), null)
   assert.equal(store.get('supergrok').accessToken, 'b')
+})
+
+test('the proxy key round-trips and is not written in the clear', () => {
+  const dir = tempDir()
+  const store = createStore({ dir, safeStorage: fakeSafeStorage() })
+  assert.equal(store.getSecret(), '', 'no key before one is set')
+  store.setSecret('sk-local-abc')
+  assert.equal(store.getSecret(), 'sk-local-abc')
+  assert.ok(!fs.readFileSync(path.join(dir, 'proxy-key.json'), 'utf8').includes('sk-local-abc'))
+  // a fresh store over the same directory: the key is stable across restarts
+  const again = createStore({ dir, safeStorage: fakeSafeStorage() })
+  assert.equal(again.getSecret(), 'sk-local-abc')
+})
+
+test('the proxy key is not stored when encryption is unavailable', () => {
+  const store = createStore({ dir: tempDir(), safeStorage: fakeSafeStorage({ available: false }) })
+  assert.throws(() => store.setSecret('sk-local-abc'), /plaintext/)
 })

@@ -12,6 +12,7 @@
  */
 
 const path = require('path')
+const { randomBytes } = require('crypto')
 const { createStore } = require('./lib/store')
 const { createChatGPTAuth } = require('./lib/chatgpt')
 const { createGrokAuth } = require('./lib/grok')
@@ -32,10 +33,34 @@ function tokenDir () {
   return path.join(__dirname, '..', TOKEN_DIR)
 }
 
+/**
+ * The key electerm sends as "API key".
+ *
+ * Without one, any page in the user's browser that guesses the port can spend
+ * the subscription; the port alone is not a credential. It is generated once
+ * and kept, so the value the user pastes into electerm stays valid across
+ * restarts. If it cannot be stored encrypted, it still works for this run and
+ * the log says it will change next time -- refusing to start would be worse
+ * than a key the user has to re-copy.
+ */
+function ensureSecret (store, log) {
+  const existing = store.getSecret()
+  if (existing) {
+    return existing
+  }
+  const key = `sk-local-${randomBytes(24).toString('base64url')}`
+  try {
+    store.setSecret(key)
+  } catch (error) {
+    log('warn', `Cannot save the proxy key (${error.message}), it will change on the next start`)
+  }
+  return key
+}
+
 const widgetInfo = {
   name: 'AI subscription proxy',
   description: 'Sign in to a ChatGPT or SuperGrok subscription, then point electerm\'s AI config at the local proxy it runs.',
-  version: '0.1.0',
+  version: '0.2.0',
   author: 'ZHAO Xudong',
   type: 'instance',
   builtin: false,
@@ -103,7 +128,8 @@ function widgetRun (config = {}, ctx = {}) {
     const auth = provider === 'supergrok'
       ? createGrokAuth(deps)
       : createChatGPTAuth(deps)
-    server = createProxyServer({ port, provider, auth, log })
+    const secret = ensureSecret(store, log)
+    server = createProxyServer({ port, provider, auth, secret, log })
     const { url } = await server.start()
     const status = auth.status()
     return {
@@ -111,9 +137,21 @@ function widgetRun (config = {}, ctx = {}) {
       msg: status.connected
         ? `${label} proxy is running at ${url}`
         : `${label} proxy is running at ${url} - open it to sign in`,
+      // Offered to electerm, not applied: the widget panel lists these values
+      // and the user presses "Use these settings" (see electerm's
+      // app/widgets/ai-config.js for the whitelist). The model is left out on
+      // purpose -- this widget does not know which one the plan exposes until
+      // the user asks, and electerm's own "Load models" button fills it in.
+      aiConfig: {
+        nameAI: `${label} subscription`,
+        baseURLAI: `${url}/v1`,
+        apiPathAI: '/responses',
+        apiKeyAI: secret,
+        authHeaderNameAI: 'Authorization: Bearer'
+      },
       serverInfo: {
         url,
-        path: 'Open this URL to sign in, then point electerm AI config at it'
+        path: 'Open this URL to sign in, then use "Use these settings" below'
       }
     }
   }
