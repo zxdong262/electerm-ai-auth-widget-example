@@ -1,8 +1,8 @@
 {
   "name": "electerm-ai-auth-widget-example",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": true,
-  "description": "An electerm widget that signs in to a ChatGPT or SuperGrok subscription and exposes it as a local OpenAI Responses endpoint.",
+  "description": "An electerm widget that signs in to a ChatGPT or SuperGrok subscription in its own panel and exposes it as a local OpenAI Responses endpoint.",
   "main": "index.js",
   "license": "MIT",
   "author": "ZHAO Xudong",
@@ -19,12 +19,14 @@
   "electerm": {
     "id": "ai-auth-proxy",
     "name": "AI subscription proxy",
-    "description": "Sign in to a ChatGPT or SuperGrok subscription, then point electerm's AI config at the local proxy it runs.",
-    "version": "0.2.0",
+    "description": "Sign in to a ChatGPT or SuperGrok subscription in this panel, then apply the AI settings it offers.",
+    "version": "0.3.1",
     "author": "ZHAO Xudong",
     "homepage": "https://github.com/zxdong262/electerm-ai-auth-widget-example",
     "type": "instance",
     "singleInstance": true,
+    "ui": "ui/index.html",
+    "autoRun": true,
     "configs": [
       {
         "name": "provider",
@@ -51,11 +53,11 @@
         "description": "The proxy listens on 127.0.0.1 at this port. Change it only if 8788 is taken; the URL in electerm's AI config has to match."
       },
       {
-        "name": "autoRun",
-        "type": "boolean",
-        "label": "Start with electerm",
-        "default": true,
-        "description": "Start this widget when electerm starts, so the AI panel keeps working without opening the widget list first."
+        "name": "upstreamProxy",
+        "type": "string",
+        "label": "Upstream proxy",
+        "default": "",
+        "description": "Proxy for sign-in and API calls (http://... or socks5://...). Leave empty to use HTTPS_PROXY, then the system proxy (the one a VPN sets), then a direct connection. electerm's own AI Proxy is cleared by 'Use these settings' because this endpoint is local."
       }
     ]
   }

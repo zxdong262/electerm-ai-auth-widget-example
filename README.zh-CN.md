@@ -4,15 +4,15 @@
 **SuperGrok** 订阅，把订阅包装成本地的 OpenAI **Responses** 接口，让 electerm 的 AI 面板
 ——对话、带工具的 agent 模式、AI 书签、主题生成、快捷命令、命令联想——直接使用订阅，而不是 API key。
 
-它在 `127.0.0.1` 上跑一个小代理，令牌只留在 electerm 的主进程里。**使用它不需要改动 electerm 本体**：
-代理是通过 AI 配置访问的，而 widget 也会把这份配置一并递出去，让用户一键应用（这需要 electerm 认识
-widget 的 `aiConfig` 提议，见[让 electerm 用上它](#让-electerm-用上它)）。
+**登录和配置都在 widget 自己的面板里完成**：导入一次，点 **Sign in**，再点面板上方的
+**Use these settings** 就结束。代理随 electerm 启动，令牌只留在主进程；唯一可选的配置是网络需要代理时
+填写的上游代理。面板标题栏的 **Run/Stop** 按钮显示并控制代理的运行状态。
 
 > **说明。** 这是一个示例，不是 electerm 的一部分。OAuth 协议细节来自
 > [PR #4589](https://github.com/electerm/electerm/pull/4589)（作者
 > [@thejohnd0e](https://github.com/thejohnd0e)，他已在 Windows 上跑通该流程）；本仓库作者没有用真实账号
-> 登录验证过。凡是无需账号就能验证的部分——代理、令牌存储、请求与流的格式（用 electerm 自己的解析器验证）——
-> 都在 `npm test` 里。
+> 登录验证过。凡是无需账号就能验证的部分——代理、令牌存储、上游代理层、面板接口，以及用 electerm 自己的
+> 解析器验证请求与流的格式——都在 `npm test` 里。
 
 ## 为什么代理可行
 
@@ -35,101 +35,92 @@ electerm 本来就原生支持 Responses 协议（`src/app/lib/ai-format.js`：`
 
 ## 环境要求
 
-- 支持自定义 widget 的 electerm 版本（`设置 → Widgets` 里有 **导入** 按钮）。
+- 支持自定义 widget 的 electerm，并且带上 [issue #4591](https://github.com/electerm/electerm/issues/4591)
+  讨论里的几处小改动：带 `electerm.ui` 的 widget 可以自动启动、面板带 Run/Stop 按钮、widget 的
+  `aiConfig` 提议可以清空某个设置（面板里显示为 `none`）、面板调用绑定到正在运行的模块实例，
+  以及主进程把 agent 工厂交给 widget，让它使用用户自己设置的代理。
 - 想跑测试的话需要 Node 20+。widget 本身用的是 electerm 内置的 Node 运行时。
 - 一个 provider 允许这种访问方式的 ChatGPT 或 SuperGrok 订阅。如果套餐没有权限，provider 的报错会原样显示，
   **不会**悄悄退回 API 计费。
 
-## 安装
+旧版本 electerm 上这个 widget 仍然可用：在浏览器里打开代理地址登录，再把页面上列出的值抄进
+**设置 → AI**。
+
+## 安装与使用
 
 ```bash
 git clone https://github.com/zxdong262/electerm-ai-auth-widget-example.git
 ```
 
-1. electerm 里打开 **设置 → Widgets**。
-2. 点 **导入**，选中刚克隆的目录。（目录名不影响安装，widget 会按 `package.json` 里的 `electerm.id`
-   安装为 `ai-auth-proxy`。）
-3. 在列表里选中 **AI subscription proxy**，provider 保持 `ChatGPT` 或 `SuperGrok`，端口保持 `8788`，
-   勾上 **Start with electerm**。
-4. 点 **运行**。会弹出一个提示，显示代理地址，此时它已经在监听了。
+1. electerm 里打开 **设置 → Widgets → 导入**，选中刚克隆的目录。它会按 `package.json` 安装为
+   `ai-auth-proxy`。
+2. 在列表里选中 **AI subscription proxy**。面板会自己把代理拉起来并登记为随 electerm 启动，然后点面板里的
+   **Sign in**。如果没起来（比如端口被占用），面板会直接显示错误，并用标题栏的 **Run** 按钮重试；
+   **Stop** 用来停掉代理。代理没运行时面板里的按钮都是禁用的。
+   - **ChatGPT**：会打开浏览器走 OAuth 登录，回调由应用在一个临时 `127.0.0.1` 端口上接住（只存在于登录期间）；
+     浏览器页提示"Sign-in finished"后会自行关闭，面板变成 "Connected as …"。
+   - **SuperGrok**：面板直接显示设备码，在 x.ai 上确认后面板自己更新。
+   - 用下拉框切换 provider，端口和已应用的 AI 配置都不变。
+3. 点面板上方那块 **Use these settings**。它会写入 URL、路径、密钥、认证头、面板名称，**以及模型**
+   （登录成功后 widget 会向 provider 取一次模型列表），并清空 **代理** —— 提议里显示为 `none`，因为
+   端点是本地回环地址。你不点，什么都不会被写入。
 
-日常使用中关键是那个 **Start with electerm**：它让 electerm 每次启动时自动把代理拉起来，AI 面板就不用每次
-先去开一遍 widget。之后也可以在实例列表里（运行中实例上的闪电图标）随时开关。
+配置就这些。agent 面板、AI 书签、主题生成、快捷命令读的是同一份配置。面板里的 **Send a test request**
+会走一遍和 agent 循环完全相同的非流式请求，所以"已连接"和"AI 面板真的能用"不是同一个说法。
 
-## 登录
+浏览器页面 <http://localhost:8788> 仍然保留作兜底：同样的状态、可复制的值、代理密钥、模型列表和
+**Recent requests**。手动填的话是 `http://localhost:8788/v1`、`/responses`，以及代理密钥
+（`sk-local-…`，不是 provider 的 key）。密钥重启后不变，所以配置只需要应用一次。
 
-打开提示里的地址 —— <http://localhost:8788> —— 点 **Sign in**。
+## 需要代理的网络
 
-- **ChatGPT**：会打开浏览器走 OAuth 登录，回调由应用在一个临时 `127.0.0.1` 端口上接住（只存在于登录期间），
-  成功后页面显示 "Connected as …"。
-- **SuperGrok**：页面给出一个短码，在 x.ai 上确认，页面会自己变成已连接。
+之前的死锁是：**设置 → AI → 代理** 填了地址，electerm 会把 `localhost` 请求也送进远程代理
+（`ECONNREFUSED`）；把代理清空，widget 又连不上 OpenAI（OIDC 发现请求被 Cloudflare 挡成 `403`）。
+现在两个方向是两个独立设置，都由你自己决定，core 不再对 `localhost` 做特殊处理：
 
-这个页面同时也是配置清单：要填进 electerm 的三项值都列在上面，各自可一键复制，并且带着代理密钥（见下）。
-**Send a test request** 会走一遍和 agent 面板完全相同的非流式请求，所以"已连接"和"AI 面板真的能用"不是同一个说法。
+- **Use these settings** 在写入 URL、路径、密钥的同时写入 `proxyAI: ''`，让 electerm 的 AI 客户端
+  直连本地端点。提议里明确列出 `代理: none`，清空是看得见的，不是副作用。
+- widget 自己的登录和 API 调用用面板里的 **Upstream**（`http://…` 或 `socks5://…`；OIDC 发现、
+  令牌交换、刷新、模型列表、Responses 流全部经 `lib/upstream.js` 走它）。留空时按顺序取：标准
+  `HTTPS_PROXY` 环境变量 → **系统代理**（VPN 设的那个，Chromium 会跟随而 Node 不会，这正是"VPN 明明能用
+  却仍然 403"的原因）→ 直连。保存这个字段会重启监听，好让新的 agent 生效。electerm 只提供 agent 工厂，
+  这个值不来自 **设置 → AI**，所以重启或应用提议后都不会丢。面板会显示实际走的路线，例如
+  `upstream: http://127.0.0.1:10808 (system)`。
 
-## 让 electerm 用上它
-
-**一键**：在 electerm 里打开 **设置 → Widgets → 运行中实例**，选中这个实例，点 **Use these
-settings**。widget 的启动结果里带了一份现成的 AI 配置（URL、路径、密钥、认证头、以及 AI 面板显示的
-名字），electerm 会把它列出来并配上这个按钮——你不点，什么都不会被写入。
-
-**或者手动填**，在 **设置 → AI**：
-
-| 字段 | 值 |
-| --- | --- |
-| API URL | `http://localhost:8788/v1` |
-| API PATH | `/responses` |
-| API key | 页面上的代理密钥（`sk-local-…`），不是 provider 的 key |
-| Auth Header | 保持默认（`Authorization: Bearer`） |
-| 代理 | 留空 |
-| 模型 | 在 electerm 里点 **Load models**，或者在代理页面上点一下再复制一个 |
-
-走一键路径时面板标题来自配置本身，所以会显示 "ChatGPT subscription"，而不是从 URL 猜出来的名字。
-这对本地端点有影响：electerm 猜标题时取的是域名倒数第二段，`localhost` 没有可取的段，`127.0.0.1`
-则会显示成 `0`。设了名字之后两个地址都可以——不管是点按钮设的，还是在 **Settings → AI** 里手填
-**Name**（`0` 那种情况需要支持 `aiConfig` 的同一个新版本）。
-
-模型是这份配置唯一没有带上的东西：这个 widget 在用户主动去问之前，并不知道套餐里有哪些模型，所以在
-electerm 的 AI 设置里点一次 **Load models** 填上即可。
-
-配置就这些。agent 面板、AI 书签、主题生成、快捷命令都读同一份配置，所以会一起切过去。如果密钥填错了，
-electerm 会显示代理返回的 `401` 信息，代理页面的 **Recent requests** 里也会把这条请求标出来。
-
-> 一键路径需要 electerm 支持读取 widget 结果里的 `aiConfig`（见 electerm 的
-> `app/widgets/ai-config.js`）。旧版本只会显示实例日志，上面的几项值仍然可以在代理页面上复制。
+一个要知道的后果：`proxyAI` 是全局设置，应用提议会把它对所有 AI provider 清空，不只是这个 widget；
+要切回需要代理的远程 provider，重新填 **代理** 即可，切回来时再应用一次本 widget 的提议。
 
 ## 它做不到的事
 
-- **面板标题来自配置，不是 widget 自己说了算。** AI 面板标题是从 URL 推出来的，本地地址会落到
-  "Custom AI Model"；这个 widget 在配置里带了 `nameAI`，应用之后面板会显示 "ChatGPT subscription"。
-- **一个实例只服务一个 provider。** ChatGPT 和 SuperGrok 想同时用，需要两个实例、两个端口。
-- **不支持上游 HTTP 代理。** widget 直连 provider，会忽略 electerm 里的代理设置。
+- **一次只用一个订阅。** 下拉框可以原地切换，但一个端口同一时间只服务一个 provider。
 - **只有 `/v1/responses`。** 别的路径会返回一条提示，让你改 API PATH。
+- **不做 `chat/completions`，也不做协议翻译。** 请求体和流保持 Responses 格式，只改 `store`、
+  `stream` 和认证头。
+- **内嵌面板需要较新的 electerm。** 旧版本走浏览器页面 + 手动配置。
 
 ## 安全
 
 一个能花订阅额度的本地端口，哪怕在 `127.0.0.1` 上，也值得上锁：
 
 - **代理密钥。** 每个 `/v1` 请求都必须带上页面显示的那个密钥（`Authorization: Bearer` 或 `x-api-key`）。
-  密钥只生成一次，和令牌一样用 `safeStorage` 加密保存，重启后不变，所以只需要粘贴一次。没有它，浏览器里
-  任何一个页面猜到这个端口就能花掉套餐额度。
+  密钥只生成一次，和令牌一样用 `safeStorage` 加密保存，重启后不变。没有它，浏览器里任何一个页面
+  猜到这个端口就能花掉套餐额度。
 - **Host 校验。** 请求必须发给 `localhost:<端口>`、`127.0.0.1:<端口>` 或 `[::1]:<端口>`。互联网上的页面
-  通过 DNS rebinding 指到 `127.0.0.1` 时，`Host` 里仍然是它自己的域名，会被拒——这是阻止它和代理变成
-  同源的关键。
+  通过 DNS rebinding 指到 `127.0.0.1` 时，`Host` 里仍然是它自己的域名，会被拒。
 - **Origin 校验。** 跨站 POST 带着页面的 origin，会被拒；代理自己的页面放行。管理接口同样适用。
-- **页面令牌。** 会改状态的 `signin` / `signout` / `cancel` 还需要页面 HTML 里那次渲染才有的令牌，
-  本地进程不先读页面就驱动不了登录。
+- **页面令牌。** 会改状态的 `signin` / `signout` / `cancel` 还需要页面 HTML 里那次渲染才有的令牌。
 - **只收 `application/json`**（`/v1/responses`），浏览器的表单 POST 设不了这个头。
 - **令牌**只存在于 electerm **主进程**，用 Electron `safeStorage`（钥匙串 / DPAPI / libsecret）加密。
-  系统无法加密时直接拒绝保存，**不会**退回明文。
-- 明文令牌不会进入渲染进程、`userConfig`、AI 历史或同步数据。electerm 里存的只有你手填的那几项配置。
+  系统无法加密时直接拒绝保存，**不会**退回明文。内嵌面板是独立 origin 的 iframe，通过
+  `window.electerm.call` 调主进程函数，只拿得到状态，拿不到令牌。
 - 令牌文件放在 `<数据目录>/widgets/.ai-auth-proxy/`，故意放在 widget 目录**之外**：widget 目录里的每个文件
   都会被 `electerm-widget://` 协议投递给 widget 自己的页面。
 - 页面上的 **Recent requests** 只记时间、路径、模型和状态码，**不记** prompt。
-- **AI 配置是"提议"，不是"写入"。** widget 把配置放在启动结果里递出去，electerm 列出来，只有用户按下
-  按钮时才会写。widget 也没法通过这条路设置系统提示词（`roleAI`）——那个字段不在白名单里。
-- 装 widget 等于信任一段跑在 electerm 主进程里的代码。这个 widget 持有 refresh token，导入前请自己读一遍——
-  它只有几百行，且没有任何依赖。
+- **AI 配置是"提议"，不是"写入"。** widget 把配置放在启动结果或面板调用的返回值里递出去，
+  host 列出来，只有用户按下按钮时才会写。widget 也没法通过这条路设置系统提示词（`roleAI`）——
+  那个字段不在白名单里。
+- 装 widget 等于信任一段跑在 electerm 主进程里的代码。这个 widget 持有 refresh token，
+  导入前请自己读一遍——它没有任何依赖。
 
 防不住的情况：已经以同一个系统用户身份运行的代码，它能读到页面和密钥。对本地代理来说这不在防护范围里——
 那种进程本来也可以直接挂在 electerm 上。
@@ -140,11 +131,11 @@ electerm 会显示代理返回的 `401` 信息，代理页面的 **Recent reques
 npm test
 ```
 
-覆盖：令牌存储（加密、拒绝保存、损坏记录、代理密钥）、代理（必须带密钥、Host 与 Origin 拒绝、
-`store: false`、`stream: true`、SSE 原样透传、非流式调用方的折叠、provider 错误连状态码一起转出、
-无令牌返回 401、`/v1/models` 归一化、错误路径提示、请求日志）、SSE 折叠本身、登录页面、widget 入口
-本身（`aiConfig` 提议、它的密钥就是页面显示且代理接受的那个、重启后不变），以及 OAuth 基础件
-（PKCE、回环地址精确匹配、ID token 的签名 / nonce / audience / 过期 / 篡改校验）。
+55 个测试覆盖：令牌存储、代理（密钥、Host/Origin、`store: false`、`stream: true`、SSE 透传与折叠、
+provider 错误、401、`/v1/models`、请求日志）、SSE 折叠本身、登录页、上游 HTTP 层（重定向、abort、
+agent 注入、代理规则解析、config → env → 系统代理的取值顺序）、widget 入口与面板接口（`aiConfig` 提议、
+切换 provider 不改端口、上游 agent 上报与在面板里改代理、漏启动时的自愈、显式停止后不自动重启），
+以及 OAuth 基础件（PKCE、回环地址精确匹配、ID token 的签名 / nonce / audience / 过期 / 篡改校验）。
 
 已做过的端到端验证（都不需要账号）：
 
@@ -159,16 +150,14 @@ OAuth 登录本身需要真实账号，是这里唯一只有推演、没有实�
 
 ## 文件
 
-| 文件 | 作用 |
-| --- | --- |
-| `index.js` | widget 入口：`widgetInfo`、`widgetRun`（一个实例 = 一个代理） |
-| `lib/proxy.js` | HTTP 服务：`/v1/responses`、`/v1/models`、`/admin/*`，以及访问校验 |
-| `lib/sse.js` | 把 Responses 事件流折成一个响应对象 |
-| `lib/page.js` | `/` 上的登录与配置页面 |
-| `lib/chatgpt.js` | ChatGPT OAuth（PKCE、回环回调、刷新、吊销） |
-| `lib/grok.js` | SuperGrok 设备码流程 |
-| `lib/oauth.js` | PKCE、OIDC 发现、表单请求、ID token 校验 |
-| `lib/store.js` | `safeStorage` 加密的令牌与代理密钥存储 |
+- `index.js` — widget 入口与面板接口（`getStatus`、`signIn`、`getAIConfig`、`setProvider` 等）
+- `ui/index.html` — 内嵌的登录面板（`electerm.ui`）
+- `lib/proxy.js` — HTTP 服务：`/v1/responses`、`/v1/models`、`/admin/*`，以及访问校验
+- `lib/upstream.js` — 带 electerm 代理 agent 的 fetch 风格上游传输层
+- `lib/sse.js` — 把 Responses 事件流折成一个响应对象
+- `lib/page.js` — `/` 上的浏览器兜底页面
+- `lib/chatgpt.js` / `lib/grok.js` / `lib/oauth.js` — 两套登录流程及其基础件
+- `lib/store.js` — `safeStorage` 加密的令牌与代理密钥存储
 
 ## 致谢
 
@@ -176,4 +165,4 @@ OAuth 登录本身需要真实账号，是这里唯一只有推演、没有实�
 [@thejohnd0e](https://github.com/thejohnd0e)），以及 issue
 [#4591](https://github.com/electerm/electerm/issues/4591) 的讨论。
 
-MIT。
+MIT.

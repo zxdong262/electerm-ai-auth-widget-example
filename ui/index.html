@@ -1,0 +1,355 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AI subscription</title>
+<style>
+  :root {
+    color-scheme: light dark;
+  }
+  body {
+    margin: 0;
+    padding: 16px;
+    font: 13px/1.6 system-ui, -apple-system, sans-serif;
+    color: var(--text, #222);
+    background: var(--main, #fff);
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  label {
+    color: var(--text-dark, #666);
+    min-width: 76px;
+  }
+  select, input, button {
+    font: inherit;
+    color: var(--text, #222);
+    background: transparent;
+    border: 1px solid var(--text-disabled, #bbb);
+    padding: 4px 10px;
+  }
+  input {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, monospace;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: .45;
+    cursor: default;
+  }
+  button.primary {
+    border-color: var(--primary, #08c);
+    color: var(--primary, #08c);
+  }
+  .state {
+    padding: 10px 0;
+    border-top: 1px solid var(--text-disabled, #ddd);
+    border-bottom: 1px solid var(--text-disabled, #ddd);
+    margin-bottom: 12px;
+  }
+  .strong {
+    font-size: 14px;
+  }
+  .muted, .hint {
+    color: var(--text-dark, #666);
+  }
+  .hint {
+    font-size: 12px;
+    margin-top: 14px;
+  }
+  .code {
+    font: 18px/1.4 ui-monospace, monospace;
+    letter-spacing: .1em;
+  }
+  .out {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 140px;
+    overflow: auto;
+    margin: 12px 0 0;
+    padding: 8px;
+    border: 1px solid var(--text-disabled, #ddd);
+    font: 12px/1.5 ui-monospace, monospace;
+  }
+  .hidden {
+    display: none;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  a {
+    color: var(--primary, #08c);
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="row">
+  <label for="provider">Provider</label>
+  <select id="provider">
+    <option value="chatgpt">ChatGPT</option>
+    <option value="supergrok">SuperGrok</option>
+  </select>
+  <span class="muted" id="transport"></span>
+</div>
+
+<div class="row">
+  <label for="upstream">Upstream</label>
+  <input id="upstream" type="text" placeholder="empty = system proxy" autocomplete="off" spellcheck="false">
+  <button id="save-upstream">Save</button>
+</div>
+
+<div class="state">
+  <div class="strong" id="headline">Checking the proxy…</div>
+  <div class="muted" id="detail"></div>
+</div>
+
+<div id="pending" class="state hidden">
+  <div id="pending-text"></div>
+  <div class="code" id="user-code"></div>
+  <div><a id="verify" target="_blank" rel="noreferrer"></a></div>
+</div>
+
+<div class="actions">
+  <button id="signin" class="primary">Sign in</button>
+  <button id="signout">Sign out</button>
+  <button id="cancel">Cancel sign-in</button>
+</div>
+<div class="actions">
+  <button id="offer">Refresh AI settings offer</button>
+  <button id="test">Send a test request</button>
+</div>
+
+<pre class="out hidden" id="out"></pre>
+
+<p class="hint">
+  After signing in, press <b>Use these settings</b> above this panel once. The Run/Stop button in
+  the panel header restarts the proxy after a config change. Sign-in and API calls go through
+  <b>Upstream</b>: leave it empty to follow your system proxy (the one a VPN sets), or type a
+  proxy URL to override it. The browser page at <span id="url"></span> still works if you prefer it.
+</p>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id) }
+  var busy = false
+  var offered = false
+  var isRunning = false
+  var lastStatus = null
+  // The input follows the proxy until the user starts typing; after that the
+  // 2 s poll must not overwrite what they are in the middle of entering.
+  var upstreamTouched = false
+
+  function call (name) {
+    var args = Array.prototype.slice.call(arguments, 1)
+    return window.electerm.call.apply(window.electerm, [name].concat(args))
+  }
+
+  function out (text) {
+    $('out').textContent = text
+    $('out').classList.remove('hidden')
+  }
+
+  function setBusy (value) {
+    busy = value
+    var usable = isRunning && !value
+    $('signin').disabled = !usable || !!(lastStatus && lastStatus.connected)
+    $('provider').disabled = !usable
+    $('signout').disabled = !usable
+    $('offer').disabled = !usable
+    $('test').disabled = !usable
+    $('upstream').disabled = !isRunning || value
+    $('save-upstream').disabled = !isRunning || value
+    $('cancel').disabled = !value || !isRunning
+  }
+
+  function render (s) {
+    lastStatus = s
+    isRunning = true
+    $('provider').value = s.provider
+    $('url').textContent = s.url
+    // Which proxy the requests actually use, and where that value came from:
+    // the whole question behind a 403 is "am I going out through the VPN?".
+    $('transport').textContent = s.upstream
+      ? 'upstream: ' + s.upstream + (s.upstreamSource ? ' (' + s.upstreamSource + ')' : '')
+      : 'upstream: direct'
+    $('transport').title = s.upstream
+      ? 'Set in this widget (config), in HTTPS_PROXY (env), or taken from the system proxy (system).'
+      : 'No proxy in use. If sign-in fails with 403, turn on your system proxy or set "Upstream proxy" in this widget\'s settings.'
+    if (!upstreamTouched) {
+      $('upstream').value = s.configured || ''
+    }
+    $('headline').textContent = s.connected
+      ? 'Connected' + (s.email ? ' as ' + s.email : '')
+      : (s.pending ? 'Waiting for sign-in' : 'Not connected')
+    $('detail').textContent = s.label + ' · 127.0.0.1:' + s.port +
+      (s.planUsageEnabled ? ' · plan usage enabled' : '')
+    var pending = s.pending || !!s.userCode
+    $('pending').classList.toggle('hidden', !pending)
+    if (pending) {
+      $('pending-text').textContent = s.userCode
+        ? 'Enter this code on x.ai, then come back here:'
+        : 'Finish the sign-in in the browser window that just opened.'
+      $('user-code').textContent = s.userCode || ''
+      $('verify').textContent = s.verificationUrl || ''
+      $('verify').onclick = function () {
+        if (s.verificationUrl) {
+          window.electerm.openExternal(s.verificationUrl)
+        }
+      }
+    }
+    if (s.error) {
+      out(s.error)
+    }
+    setBusy(busy)
+  }
+
+  function refresh () {
+    return call('getStatus').then(function (s) {
+      render(s)
+      // Once signed in, the offer can include a model. Refresh it once so the
+      // host's "Use these settings" button has everything filled in.
+      if (s.connected && !offered) {
+        offered = true
+        return offer().catch(function () { offered = false })
+      }
+    }).catch(function (err) {
+      isRunning = false
+      lastStatus = null
+      offered = false
+      $('headline').textContent = 'Proxy is not running — press Run above this panel'
+      $('detail').textContent = err.message
+      $('pending').classList.add('hidden')
+      setBusy(false)
+    })
+  }
+
+  function offer () {
+    // The host renders the "Use these settings" button from this result.
+    return call('getAIConfig')
+  }
+
+  $('provider').onchange = function () {
+    var value = this.value
+    window.electerm.updateConfig({ provider: value })
+    offered = false
+    setBusy(true)
+    out('Switching to ' + value + '…')
+    call('setProvider', value).then(function () {
+      return refresh()
+    }).then(function () {
+      out('Switched to ' + value + '. Sign in to use it.')
+      setBusy(false)
+      return offer()
+    }).catch(function (err) {
+      setBusy(false)
+      out(err.message)
+    })
+  }
+
+  $('upstream').oninput = function () {
+    upstreamTouched = true
+  }
+
+  // Persist the field, then rebuild the listener: the proxy agent is created
+  // when the server starts, so a running proxy cannot pick up a new one.
+  $('save-upstream').onclick = function () {
+    var value = $('upstream').value.trim()
+    setBusy(true)
+    out('Applying the upstream proxy…')
+    window.electerm.updateConfig({ upstreamProxy: value }).then(function () {
+      return call('setUpstreamProxy', value)
+    }).then(function () {
+      upstreamTouched = false
+      out(value
+        ? 'Upstream proxy set to ' + value + '.'
+        : 'Upstream proxy cleared: HTTPS_PROXY, then the system proxy, then direct.')
+      return refresh()
+    }).then(function () {
+      return offer()
+    }).catch(function (err) {
+      out(err.message)
+    }).then(function () {
+      setBusy(false)
+    })
+  }
+
+  $('signin').onclick = function () {
+    setBusy(true)
+    out('Opening your browser… finish the sign-in there, then come back to this panel.')
+    call('signIn').then(function () {
+      setBusy(false)
+      return refresh()
+    }).then(function () {
+      out(lastStatus && lastStatus.connected ? 'Connected.' : 'Sign-in is still pending.')
+      return offer()
+    }).catch(function (err) {
+      setBusy(false)
+      out(err.message)
+      return refresh()
+    })
+  }
+
+  $('signout').onclick = function () {
+    call('signOut').then(function () {
+      offered = false
+      out('Signed out.')
+      return refresh()
+    }).catch(function (err) { out(err.message) })
+  }
+
+  $('cancel').onclick = function () {
+    call('cancelSignIn').then(function () {
+      setBusy(false)
+      return refresh()
+    }).catch(function (err) { out(err.message) })
+  }
+
+  $('offer').onclick = function () {
+    offer().then(function () {
+      out('Offer refreshed above this panel.')
+    }).catch(function (err) { out(err.message) })
+  }
+
+  $('test').onclick = function () {
+    out('Sending a non-streaming request…')
+    call('testRequest').then(function (res) {
+      out(res.message + (res.status ? ' (' + res.status + ')' : ''))
+    }).catch(function (err) { out(err.message) })
+  }
+
+  var started = false
+  function start () {
+    if (started) {
+      return
+    }
+    started = true
+    window.electerm.getConfig().then(function (conf) {
+      if (conf && conf.provider) {
+        $('provider').value = conf.provider
+      }
+    })
+    refresh()
+    offer().catch(function () {})
+    setInterval(function () {
+      if (!busy) {
+        refresh()
+      }
+    }, 2000)
+  }
+  window.electerm.ready.then(start)
+  // init arrives on iframe load; never leave the panel blank if it is missed
+  setTimeout(start, 1000)
+})()
+</script>
+</body>
+</html>

@@ -24,7 +24,7 @@ function tempWidget () {
   return { root, dir }
 }
 
-function stubElectron () {
+function stubElectron ({ resolveProxy = null } = {}) {
   const electron = {
     safeStorage: {
       isEncryptionAvailable: () => true,
@@ -32,6 +32,11 @@ function stubElectron () {
       decryptString: buffer => buffer.toString('utf8').replace(/^enc::/, '')
     },
     shell: { openExternal: () => Promise.resolve() }
+  }
+  if (resolveProxy) {
+    electron.session = {
+      defaultSession: { resolveProxy: async () => resolveProxy }
+    }
   }
   const load = Module._load
   Module._load = function (request) {
@@ -69,6 +74,7 @@ test('the start result offers electerm a usable AI config', async () => {
     assert.equal(aiConfig.apiPathAI, '/responses')
     assert.equal(aiConfig.authHeaderNameAI, 'Authorization: Bearer')
     assert.match(aiConfig.nameAI, /ChatGPT/)
+    assert.equal(aiConfig.proxyAI, '', 'the offer decides the AI proxy too: loopback needs none')
 
     // the fields electerm will not take from a widget, and must not get here
     assert.equal('roleAI' in aiConfig, false, 'the system prompt is not a widget setting')
@@ -115,6 +121,299 @@ test('the key in the offer survives a restart', async () => {
     }
     assert.equal(runs[0], runs[1], 'electerm only has to apply the config once')
   } finally {
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the panel API reports state and offers an AI config', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({ provider: 'chatgpt', port }, { log: () => {} })
+    const { serverInfo } = await instance.start()
+
+    const status = await widget.getStatus()
+    assert.equal(status.provider, 'chatgpt')
+    assert.equal(status.connected, false)
+    assert.equal(status.viaProxy, false)
+    assert.equal(status.port, port)
+
+    // not signed in yet, so no model, but the offer is still complete
+    const { aiConfig } = await widget.getAIConfig()
+    assert.equal(aiConfig.baseURLAI, `${serverInfo.url}/v1`)
+    assert.equal(aiConfig.apiPathAI, '/responses')
+    assert.equal('modelAI' in aiConfig, false)
+  } finally {
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('switching provider in the panel keeps the endpoint electerm already uses', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({ provider: 'chatgpt', port }, { log: () => {} })
+    const { serverInfo } = await instance.start()
+    const before = (await widget.getAIConfig()).aiConfig
+
+    await widget.setProvider('supergrok')
+    const after = (await widget.getAIConfig()).aiConfig
+    assert.equal(after.baseURLAI, before.baseURLAI, 'the port did not change')
+    assert.match(after.nameAI, /SuperGrok/)
+    assert.equal((await widget.getStatus()).provider, 'supergrok')
+
+    // the browser fallback page follows the switch too
+    const admin = await (await fetch(`${serverInfo.url}/admin/status`)).json()
+    assert.equal(admin.provider, 'supergrok')
+  } finally {
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the user-set upstream proxy is the only proxy the widget uses', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  const seen = []
+  const ctx = {
+    log: () => {},
+    createProxyAgent: url => {
+      seen.push(url)
+      return { marker: 'user-proxy' }
+    }
+  }
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({
+      provider: 'chatgpt',
+      port,
+      upstreamProxy: 'socks5://127.0.0.1:1080'
+    }, ctx)
+    await instance.start()
+    assert.deepEqual(seen, ['socks5://127.0.0.1:1080'])
+    assert.equal((await widget.getStatus()).viaProxy, true)
+    assert.equal((await widget.getAIConfig()).aiConfig.proxyAI, '')
+  } finally {
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('HTTPS_PROXY is the fallback when the user leaves the field empty', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  const saved = process.env.HTTPS_PROXY
+  process.env.HTTPS_PROXY = 'http://env-proxy:3128'
+  const seen = []
+  const ctx = {
+    log: () => {},
+    createProxyAgent: url => {
+      seen.push(url)
+      return { marker: 'env-proxy' }
+    }
+  }
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({ provider: 'chatgpt', port }, ctx)
+    await instance.start()
+    assert.deepEqual(seen, ['http://env-proxy:3128'])
+  } finally {
+    if (saved === undefined) {
+      delete process.env.HTTPS_PROXY
+    } else {
+      process.env.HTTPS_PROXY = saved
+    }
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('older electerm builds can still hand over a ready-made agent', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun(
+      { provider: 'chatgpt', port },
+      { log: () => {}, proxyAgent: { marker: true } }
+    )
+    await instance.start()
+    assert.equal((await widget.getStatus()).viaProxy, true)
+  } finally {
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a panel call starts the proxy when the host did not', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({ provider: 'chatgpt', port }, { log: () => {} })
+    // no instance.start(): the widget was never run (or its start failed), so
+    // the panel used to fail every call with "not running yet"
+    const s = await widget.getStatus()
+    assert.equal(s.url, `http://localhost:${port}`)
+    assert.equal(s.connected, false)
+    // the host's own start() is idempotent: one listener, one offer
+    const result = await instance.start()
+    assert.equal(result.success, true)
+    assert.equal(result.serverInfo.url, s.url)
+  } finally {
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('an explicit stop stays stopped and points at the Run button', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({ provider: 'chatgpt', port }, { log: () => {} })
+    await instance.start()
+    await instance.stop()
+    await assert.rejects(
+      widget.getStatus(),
+      /Press Run in the widget panel/
+    )
+  } finally {
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the system proxy is used when the field and the env are empty', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron({ resolveProxy: 'PROXY 127.0.0.1:7890; DIRECT' })
+  const port = await freePort()
+  const saved = [process.env.HTTPS_PROXY, process.env.https_proxy]
+  delete process.env.HTTPS_PROXY
+  delete process.env.https_proxy
+  const seen = []
+  const ctx = {
+    log: () => {},
+    createProxyAgent: url => {
+      seen.push(url)
+      return { marker: 'system-proxy' }
+    }
+  }
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({ provider: 'chatgpt', port }, ctx)
+    await instance.start()
+    // Node ignores the OS proxy; a VPN that only sets the system proxy used to
+    // leave sign-in at a Cloudflare 403.
+    assert.deepEqual(seen, ['http://127.0.0.1:7890'])
+    const status = await widget.getStatus()
+    assert.equal(status.viaProxy, true)
+    assert.equal(status.upstream, 'http://127.0.0.1:7890')
+    assert.equal(status.upstreamSource, 'system')
+  } finally {
+    if (saved[0] === undefined) {
+      delete process.env.HTTPS_PROXY
+    } else {
+      process.env.HTTPS_PROXY = saved[0]
+    }
+    if (saved[1] === undefined) {
+      delete process.env.https_proxy
+    } else {
+      process.env.https_proxy = saved[1]
+    }
+    if (instance) {
+      await instance.stop()
+    }
+    restore()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('saving an upstream proxy from the panel rebuilds the listener', async () => {
+  const { root, dir } = tempWidget()
+  const restore = stubElectron()
+  const port = await freePort()
+  const saved = [process.env.HTTPS_PROXY, process.env.https_proxy]
+  delete process.env.HTTPS_PROXY
+  delete process.env.https_proxy
+  const seen = []
+  const ctx = {
+    log: () => {},
+    createProxyAgent: url => {
+      seen.push(url)
+      return { marker: url }
+    }
+  }
+  let instance
+  try {
+    const widget = require(path.join(dir, 'index.js'))
+    instance = widget.widgetRun({ provider: 'chatgpt', port }, ctx)
+    await instance.start()
+    assert.equal((await widget.getStatus()).viaProxy, false)
+
+    await widget.setUpstreamProxy('socks5://127.0.0.1:1080')
+    assert.deepEqual(seen, ['socks5://127.0.0.1:1080'])
+    const status = await widget.getStatus()
+    assert.equal(status.viaProxy, true)
+    assert.equal(status.upstream, 'socks5://127.0.0.1:1080')
+    assert.equal(status.upstreamSource, 'config')
+    // restart keeps the same port and server secret, so the AI config stays valid
+    assert.equal(status.port, port)
+    assert.equal((await widget.getAIConfig()).aiConfig.baseURLAI, status.url + '/v1')
+  } finally {
+    if (saved[0] === undefined) {
+      delete process.env.HTTPS_PROXY
+    } else {
+      process.env.HTTPS_PROXY = saved[0]
+    }
+    if (saved[1] === undefined) {
+      delete process.env.https_proxy
+    } else {
+      process.env.https_proxy = saved[1]
+    }
+    if (instance) {
+      await instance.stop()
+    }
     restore()
     fs.rmSync(root, { recursive: true, force: true })
   }
