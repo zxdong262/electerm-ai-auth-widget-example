@@ -6,8 +6,8 @@ const path = require('path')
 const Module = require('module')
 
 // The widget entry as electerm runs it: copied into <data>/widgets/<id>/, with
-// electron replaced by a stand-in. This is the only place the start result is
-// checked, and it is what electerm's widget panel reads.
+// the host api replaced by a stand-in. This is the only place the start result
+// is checked, and it is what electerm's widget panel reads.
 //
 // The copy matters: the widget keeps its tokens next to its own folder, so
 // running the repo in place would write into the developer's home directory.
@@ -24,24 +24,39 @@ function tempWidget () {
   return { root, dir }
 }
 
-function stubElectron ({ resolveProxy = null } = {}) {
-  const electron = {
-    safeStorage: {
-      isEncryptionAvailable: () => true,
-      encryptString: value => Buffer.from(`enc::${value}`, 'utf8'),
-      decryptString: buffer => buffer.toString('utf8').replace(/^enc::/, '')
+// What the host hands a widget with require('@electerm/widget-api'): the same
+// three calls as electron's safeStorage, shell.openExternal, and the proxy the
+// OS would use. Reversible, obviously not secure.
+function stubApi ({ resolveProxy = '' } = {}) {
+  const api = {
+    id: 'ai-auth-proxy',
+    isWebApp: false,
+    platform: process.platform,
+    capabilities: {
+      css: true,
+      notify: true,
+      openExternal: true,
+      clipboard: true,
+      dialog: true,
+      secret: true,
+      net: true
     },
-    shell: { openExternal: () => Promise.resolve() }
-  }
-  if (resolveProxy) {
-    electron.session = {
-      defaultSession: { resolveProxy: async () => resolveProxy }
+    log: () => {},
+    event: () => {},
+    openExternal: () => Promise.resolve(),
+    secret: {
+      available: () => true,
+      encrypt: value => Buffer.from(`enc::${value}`, 'utf8').toString('base64'),
+      decrypt: data => Buffer.from(data, 'base64').toString('utf8').replace(/^enc::/, '')
+    },
+    net: {
+      resolveProxy: async () => resolveProxy
     }
   }
   const load = Module._load
   Module._load = function (request) {
-    if (request === 'electron') {
-      return electron
+    if (request === '@electerm/widget-api') {
+      return api
     }
     return load.apply(this, arguments)
   }
@@ -60,7 +75,7 @@ async function freePort () {
 
 test('the start result offers electerm a usable AI config', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   let instance
   try {
@@ -108,7 +123,7 @@ test('the start result offers electerm a usable AI config', async () => {
 
 test('the key in the offer survives a restart', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   const runs = []
   try {
@@ -128,7 +143,7 @@ test('the key in the offer survives a restart', async () => {
 
 test('the panel API reports state and offers an AI config', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   let instance
   try {
@@ -158,7 +173,7 @@ test('the panel API reports state and offers an AI config', async () => {
 
 test('switching provider in the panel keeps the endpoint electerm already uses', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   let instance
   try {
@@ -187,7 +202,7 @@ test('switching provider in the panel keeps the endpoint electerm already uses',
 
 test('the user-set upstream proxy is the only proxy the widget uses', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   const seen = []
   const ctx = {
@@ -220,7 +235,7 @@ test('the user-set upstream proxy is the only proxy the widget uses', async () =
 
 test('HTTPS_PROXY is the fallback when the user leaves the field empty', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   const saved = process.env.HTTPS_PROXY
   process.env.HTTPS_PROXY = 'http://env-proxy:3128'
@@ -254,7 +269,7 @@ test('HTTPS_PROXY is the fallback when the user leaves the field empty', async (
 
 test('older electerm builds can still hand over a ready-made agent', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   let instance
   try {
@@ -276,7 +291,7 @@ test('older electerm builds can still hand over a ready-made agent', async () =>
 
 test('a panel call starts the proxy when the host did not', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   let instance
   try {
@@ -302,7 +317,7 @@ test('a panel call starts the proxy when the host did not', async () => {
 
 test('an explicit stop stays stopped and points at the Run button', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   let instance
   try {
@@ -325,7 +340,7 @@ test('an explicit stop stays stopped and points at the Run button', async () => 
 
 test('the system proxy is used when the field and the env are empty', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron({ resolveProxy: 'PROXY 127.0.0.1:7890; DIRECT' })
+  const restore = stubApi({ resolveProxy: 'PROXY 127.0.0.1:7890; DIRECT' })
   const port = await freePort()
   const saved = [process.env.HTTPS_PROXY, process.env.https_proxy]
   delete process.env.HTTPS_PROXY
@@ -371,7 +386,7 @@ test('the system proxy is used when the field and the env are empty', async () =
 
 test('saving an upstream proxy from the panel rebuilds the listener', async () => {
   const { root, dir } = tempWidget()
-  const restore = stubElectron()
+  const restore = stubApi()
   const port = await freePort()
   const saved = [process.env.HTTPS_PROXY, process.env.https_proxy]
   delete process.env.HTTPS_PROXY

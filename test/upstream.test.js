@@ -150,7 +150,7 @@ test('the widget field wins, then HTTPS_PROXY, then the system proxy', async () 
       { url: 'http://two:2', source: 'env' }
     )
     delete process.env.HTTPS_PROXY
-    // no electron under node --test: the system lookup is skipped, not thrown
+    // no host api under node --test: the system lookup is skipped, not thrown
     assert.deepEqual(await resolveUpstreamProxy({}), { url: '', source: '' })
   } finally {
     if (saved[0] === undefined) {
@@ -166,18 +166,16 @@ test('the widget field wins, then HTTPS_PROXY, then the system proxy', async () 
   }
 })
 
-test('the system proxy is read from Electron when nothing else is set', async () => {
+test('the system proxy comes from the host api when nothing else is set', async () => {
   const Module = require('module')
   const load = Module._load
   Module._load = function (request) {
-    if (request === 'electron') {
+    if (request === '@electerm/widget-api') {
       return {
-        session: {
-          defaultSession: {
-            resolveProxy: async url => {
-              assert.match(url, /^https:/)
-              return 'PROXY 127.0.0.1:7890; DIRECT'
-            }
+        net: {
+          resolveProxy: async url => {
+            assert.match(url, /^https:/)
+            return 'PROXY 127.0.0.1:7890; DIRECT'
           }
         }
       }
