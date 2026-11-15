@@ -126,8 +126,8 @@ provider, not just this widget; switch back to a remote provider that needs a pr
 A local port that spends a subscription is worth locking, even when it is on `127.0.0.1`:
 
 - **The proxy key.** Every `/v1` call must send the key the page shows, as `Authorization: Bearer`
-  or `x-api-key`. It is generated once, encrypted with `safeStorage` like the tokens, and stays the
-  same across restarts. Without it, any page in the browser could guess the port and spend the plan.
+  or `x-api-key`. It is generated once, encrypted through the widget api's `secret` (Electron's
+  `safeStorage` on the desktop) like the tokens, and stays the same across restarts. Without it, any page in the browser could guess the port and spend the plan.
 - **Host check.** Requests must be addressed to `localhost:<port>`, `127.0.0.1:<port>` or
   `[::1]:<port>`. A DNS-rebound page keeps its own name in `Host` and is refused.
 - **Origin check.** A cross-site POST is refused; the proxy's own page is allowed. Admin routes
@@ -135,7 +135,8 @@ A local port that spends a subscription is worth locking, even when it is on `12
 - **Page token.** The mutating admin routes (`signin`, `signout`, `cancel`) also need the
   per-render token that only exists in the page's HTML.
 - **`application/json` only** on `/v1/responses`, which a browser form post cannot set.
-- **Tokens** live only in electerm's **main process**, encrypted with Electron `safeStorage`
+- **Tokens** live only in electerm's **main process**, encrypted through
+  `require('@electerm/widget-api').secret` — Electron's `safeStorage` on the desktop
   (Keychain / DPAPI / libsecret). If the OS cannot encrypt, saving is refused — no plaintext
   fallback. The embedded panel is an iframe on its own origin; it calls main-process functions
   through `window.electerm.call` and only ever receives a status, never a token.
@@ -188,7 +189,7 @@ about, not run, here.
 - `lib/sse.js` — folds a Responses event stream into one response object
 - `lib/page.js` — browser fallback page at `/`
 - `lib/chatgpt.js` / `lib/grok.js` / `lib/oauth.js` — the two sign-in flows and their primitives
-- `lib/store.js` — `safeStorage`-encrypted token and proxy-key store
+- `lib/store.js` — token and proxy-key store, encrypted with the host api's `secret`
 
 ## Credits
 

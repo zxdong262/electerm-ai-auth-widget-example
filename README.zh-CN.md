@@ -103,14 +103,14 @@ git clone https://github.com/zxdong262/electerm-ai-auth-widget-example.git
 一个能花订阅额度的本地端口，哪怕在 `127.0.0.1` 上，也值得上锁：
 
 - **代理密钥。** 每个 `/v1` 请求都必须带上页面显示的那个密钥（`Authorization: Bearer` 或 `x-api-key`）。
-  密钥只生成一次，和令牌一样用 `safeStorage` 加密保存，重启后不变。没有它，浏览器里任何一个页面
+  密钥只生成一次，和令牌一样通过 widget api 的 `secret`（桌面版就是 Electron 的 `safeStorage`）加密保存，重启后不变。没有它，浏览器里任何一个页面
   猜到这个端口就能花掉套餐额度。
 - **Host 校验。** 请求必须发给 `localhost:<端口>`、`127.0.0.1:<端口>` 或 `[::1]:<端口>`。互联网上的页面
   通过 DNS rebinding 指到 `127.0.0.1` 时，`Host` 里仍然是它自己的域名，会被拒。
 - **Origin 校验。** 跨站 POST 带着页面的 origin，会被拒；代理自己的页面放行。管理接口同样适用。
 - **页面令牌。** 会改状态的 `signin` / `signout` / `cancel` 还需要页面 HTML 里那次渲染才有的令牌。
 - **只收 `application/json`**（`/v1/responses`），浏览器的表单 POST 设不了这个头。
-- **令牌**只存在于 electerm **主进程**，用 Electron `safeStorage`（钥匙串 / DPAPI / libsecret）加密。
+- **令牌**只存在于 electerm **主进程**，通过 `require('@electerm/widget-api').secret` 加密——桌面版背后是 Electron `safeStorage`（钥匙串 / DPAPI / libsecret）。
   系统无法加密时直接拒绝保存，**不会**退回明文。内嵌面板是独立 origin 的 iframe，通过
   `window.electerm.call` 调主进程函数，只拿得到状态，拿不到令牌。
 - 令牌文件放在 `<数据目录>/widgets/.ai-auth-proxy/`，故意放在 widget 目录**之外**：widget 目录里的每个文件
@@ -157,7 +157,7 @@ OAuth 登录本身需要真实账号，是这里唯一只有推演、没有实�
 - `lib/sse.js` — 把 Responses 事件流折成一个响应对象
 - `lib/page.js` — `/` 上的浏览器兜底页面
 - `lib/chatgpt.js` / `lib/grok.js` / `lib/oauth.js` — 两套登录流程及其基础件
-- `lib/store.js` — `safeStorage` 加密的令牌与代理密钥存储
+- `lib/store.js` — 令牌与代理密钥存储，用宿主 api 的 `secret` 加密
 
 ## 致谢
 

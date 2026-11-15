@@ -1,6 +1,6 @@
 {
   "name": "electerm-ai-auth-widget-example",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "An electerm widget that signs in to a ChatGPT or SuperGrok subscription in its own panel and exposes it as a local OpenAI Responses endpoint.",
   "main": "index.js",
@@ -20,7 +20,7 @@
     "id": "ai-auth-proxy",
     "name": "AI subscription proxy",
     "description": "Sign in to a ChatGPT or SuperGrok subscription in this panel, then apply the AI settings it offers.",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "author": "ZHAO Xudong",
     "homepage": "https://github.com/zxdong262/electerm-ai-auth-widget-example",
     "type": "instance",

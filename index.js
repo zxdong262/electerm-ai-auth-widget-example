@@ -172,9 +172,10 @@ function widgetRun (config = {}, ctx = {}) {
   }
 
   async function doStart () {
-    // Required lazily: this module is also loaded by `node --test`, where
-    // electron does not exist.
-    const { safeStorage, shell } = require('electron')
+    // Resolved here, not at load time: the host writes this module into the
+    // widget folder before the entry is required (app/widgets/api-entry.js),
+    // and `node --test` runs without a host.
+    const api = require('@electerm/widget-api')
     // Which proxy the upstream calls use, resolved when the proxy starts:
     // the widget's own field, then HTTPS_PROXY, then the OS proxy Chromium
     // would use. Node ignores the OS setting, so without the last step a VPN
@@ -197,12 +198,23 @@ function widgetRun (config = {}, ctx = {}) {
         ? `upstream through ${upstream.url} (${upstream.source})`
         : 'upstream direct'
     )
-    const store = createStore({ dir: tokenDir(), safeStorage })
+    // lib/store.js encrypts with whatever `safeStorage` it is given; the api
+    // has the same three calls, so the store stays host-agnostic. A host
+    // without a keychain reports `available() === false` and the store falls
+    // back to what it does for node --test.
+    const store = createStore({
+      dir: tokenDir(),
+      safeStorage: {
+        isEncryptionAvailable: () => api.secret.available(),
+        encryptString: text => Buffer.from(api.secret.encrypt(text), 'base64'),
+        decryptString: buffer => api.secret.decrypt(buffer.toString('base64'))
+      }
+    })
     const deps = {
       store,
       log,
       fetchImpl,
-      openExternal: url => shell.openExternal(url)
+      openExternal: url => api.openExternal(url)
     }
     // Both auth objects are cheap and share the token store, so the panel can
     // switch provider without stopping the listener and changing the port.
